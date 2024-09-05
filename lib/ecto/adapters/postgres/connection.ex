@@ -575,9 +575,59 @@ if Code.ensure_loaded?(Postgrex) do
        ], exprs}
     end
 
-    defp from(%{from: %{source: source, hints: hints}} = query, sources) do
+    defp from(%{from: %{source: source, hints: hints}, searches: []} = query, sources) do
       {from, name} = get_source(query, sources, 0, source)
       [" FROM ", from, " AS ", name | Enum.map(hints, &[?\s | &1])]
+    end
+
+    defp from(%{from: %{source: source, hints: _}, searches: searches} = query, sources) do
+      {[34, from, 34], name} = get_source(query, sources, 0, source)
+
+      [
+        " FROM ",
+        from <> "_search_idx.search(query => ", search(searches, sources, query), ", ",
+        search_opts(query, sources),
+        ?),
+        " AS ",
+        name
+      ]
+    end
+
+    defp search_opts(query, sources) do
+      [
+        case query.search_limit do
+          %QueryExpr{expr: expr} -> ["limit_rows => ", expr(expr, sources, query)]
+          nil -> nil
+        end,
+
+        case query.search_offset do
+          %QueryExpr{expr: expr} -> ["offset_rows => ", expr(expr, sources, query)]
+          nil -> nil
+        end,
+
+        case query.search_stable_sort do
+          %QueryExpr{expr: expr} -> ["stable_sort => ", expr(expr, sources, query)]
+          nil -> nil
+        end,
+      ]
+      |> Enum.reject(& is_nil(&1))
+      |> Enum.join(", ")
+    end
+
+    defp search([], _sources, _query), do: raise "Unreachable!"
+
+    defp search([%{expr: expr, op: _}], sources, query) do
+      search_expr(expr, sources, query)
+    end
+
+    defp search([%{expr: expr, op: op} | query_exprs], sources, query) do
+      Enum.reduce(query_exprs, {op, search_expr(expr, sources, query)}, fn
+        %BooleanExpr{expr: expr, op: op}, {op, acc} ->
+          {op, [acc, operator_to_boolean(op), search_expr(expr, sources, query)]}
+        %BooleanExpr{expr: expr, op: op}, {_, acc} ->
+          {op, [?(, acc, ?), operator_to_boolean(op), search_expr(expr, sources, query)]}
+      end)
+      |> elem(1)
     end
 
     defp cte(%{with_ctes: %WithExpr{queries: [_ | _]}} = query, sources) do
@@ -1125,6 +1175,14 @@ if Code.ensure_loaded?(Postgrex) do
 
     defp expr(expr, _sources, query) do
       error!(query, "unsupported expression: #{inspect(expr)}")
+    end
+
+    defp search_expr({:parse, _, [_, parade_db_query]}, sources, query) do
+      ["paradedb.parse(", expr(parade_db_query, sources, query), ")"]
+    end
+
+    defp search_expr({:term, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, term]}, sources, query) when is_atom(field) do
+      ["paradedb.term(field => ", ?', Atom.to_string(field), ?', ", value => ", expr(term, sources, query), ")"]
     end
 
     defp json_extract_path(expr, [], sources, query) do
