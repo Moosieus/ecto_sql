@@ -585,7 +585,8 @@ if Code.ensure_loaded?(Postgrex) do
 
       [
         " FROM ",
-        from <> "_search_idx.search(query => ", search(searches, sources, query), ", ",
+        from, "_search_idx.search(query => ",
+        search(searches, sources, query),
         search_opts(query, sources),
         ?),
         " AS ",
@@ -599,35 +600,54 @@ if Code.ensure_loaded?(Postgrex) do
           %QueryExpr{expr: expr} -> ["limit_rows => ", expr(expr, sources, query)]
           nil -> nil
         end,
-
         case query.search_offset do
           %QueryExpr{expr: expr} -> ["offset_rows => ", expr(expr, sources, query)]
           nil -> nil
         end,
-
         case query.search_stable_sort do
           %QueryExpr{expr: expr} -> ["stable_sort => ", expr(expr, sources, query)]
           nil -> nil
-        end,
+        end
       ]
-      |> Enum.reject(& is_nil(&1))
-      |> Enum.join(", ")
+      |> Enum.reject(&is_nil(&1))
+      |> case do
+        [] -> []
+        opts -> [", ", Enum.intersperse(opts, ", ")]
+      end
     end
 
-    defp search([], _sources, _query), do: raise "Unreachable!"
+    defp search([], _sources, _query), do: raise("Unreachable! (write a better error message here)")
 
     defp search([%{expr: expr, op: _}], sources, query) do
       search_expr(expr, sources, query)
     end
 
     defp search([%{expr: expr, op: op} | query_exprs], sources, query) do
-      Enum.reduce(query_exprs, {op, search_expr(expr, sources, query)}, fn
-        %BooleanExpr{expr: expr, op: op}, {op, acc} ->
-          {op, [acc, operator_to_boolean(op), search_expr(expr, sources, query)]}
-        %BooleanExpr{expr: expr, op: op}, {_, acc} ->
-          {op, [?(, acc, ?), operator_to_boolean(op), search_expr(expr, sources, query)]}
-      end)
-      |> elem(1)
+      [
+        Enum.reduce(
+          query_exprs,
+          {op, [operator_to_pdb_boolean(op), search_expr(expr, sources, query)]},
+          fn
+            %BooleanExpr{expr: expr, op: op}, {op, acc} ->
+              {op, [acc, ", ", search_expr(expr, sources, query)]}
+
+            %BooleanExpr{expr: expr, op: op}, {_, acc} ->
+              {op,
+               [operator_to_pdb_boolean(op), acc, ?], ?), ", ", search_expr(expr, sources, query)]}
+          end
+        )
+        |> elem(1),
+        ?],
+        ?)
+      ]
+    end
+
+    defp operator_to_pdb_boolean(:and) do
+      "paradedb.boolean(must => ARRAY["
+    end
+
+    defp operator_to_pdb_boolean(:or) do
+      "paradedb.boolean(should => ARRAY["
     end
 
     defp cte(%{with_ctes: %WithExpr{queries: [_ | _]}} = query, sources) do
@@ -1181,8 +1201,210 @@ if Code.ensure_loaded?(Postgrex) do
       ["paradedb.parse(", expr(parade_db_query, sources, query), ")"]
     end
 
-    defp search_expr({:term, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, term]}, sources, query) when is_atom(field) do
-      ["paradedb.term(field => ", ?', Atom.to_string(field), ?', ", value => ", expr(term, sources, query), ")"]
+    defp search_expr({:all, _, [_]}, _, _) do
+      "paradedb.all()"
+    end
+
+    defp search_expr({:boost, _, [subquery, boost]}, sources, query) do
+      # the cast to ::real here is ugly, but it works.
+      [
+        "paradedb.boost(query => ",
+        search_expr(subquery, sources, query),
+        ", boost => ",
+        expr(boost, sources, query),
+        "::real)"
+      ]
+    end
+
+    defp search_expr({:const_score, _, [subquery, score]}, sources, query) do
+      [
+        "paradedb.const_score(query => ",
+        search_expr(subquery, sources, query),
+        ", const_score => ",
+        expr(score, sources, query),
+        "::real)"
+      ]
+    end
+
+    defp search_expr({:empty, _, [_]}, _, _) do
+      "paradedb.empty()"
+    end
+
+    defp search_expr({:exists, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}]}, _, _)
+         when is_atom(field) do
+      ["paradedb.exists(field => ", ?', Atom.to_string(field), ?', ")"]
+    end
+
+    defp search_expr(
+           {:fuzzy_term, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, value]},
+           sources,
+           query
+         )
+         when is_atom(field) do
+      [
+        "paradedb.fuzzy_term(field => ",
+        atom_to_string(field),
+        ", value => ",
+        expr(value, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:fuzzy_term, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, value, opts]},
+           sources,
+           query
+         )
+         when is_atom(field) and is_list(opts) do
+      [
+        "paradedb.fuzzy_term(field => ",
+        atom_to_string(field),
+        ", value => ",
+        expr(value, sources, query),
+        search_expr_opts(opts, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:phrase, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, phrases]},
+           sources,
+           query
+         )
+         when is_atom(field) do
+      [
+        "paradedb.phrase(field => ",
+        atom_to_string(field),
+        ", phrases => ",
+        expr(phrases, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:phrase, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, phrases, slop]},
+           sources,
+           query
+         )
+         when is_atom(field) do
+      [
+        "paradedb.phrase(field => ",
+        atom_to_string(field),
+        ", phrases => ",
+        expr(phrases, sources, query),
+        ", slop => ",
+        expr(slop, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:phrase, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, phrases]},
+           sources,
+           query
+         )
+         when is_atom(field) do
+      [
+        "paradedb.phrase(field => ",
+        atom_to_string(field),
+        ", phrases => ",
+        expr(phrases, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:phrase_prefix, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, phrases]},
+           sources,
+           query
+         )
+         when is_atom(field) do
+      [
+        "paradedb.phrase_prefix(field => ",
+        atom_to_string(field),
+        ", phrases => ",
+        expr(phrases, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:phrase_prefix, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, phrases, slop]},
+           sources,
+           query
+         )
+         when is_atom(field) do
+      [
+        "paradedb.phrase_prefix(field => ",
+        atom_to_string(field),
+        ", phrases => ",
+        expr(phrases, sources, query),
+        ", slop => ",
+        expr(slop, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {:regex, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, pattern]},
+           sources,
+           query
+         ) do
+      [
+        "paradedb.regex(field => ",
+        atom_to_string(field),
+        ", pattern => ",
+        expr(pattern, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr({:term, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, term]}, sources, query)
+         when is_atom(field) do
+      [
+        "paradedb.term(field => ",
+        atom_to_string(field),
+        ", value => ",
+        expr(term, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr({:term_set, _, [_, term_set]}, sources, query) when is_list(term_set) do
+      [
+        "paradedb.term_set(terms => ARRAY[",
+        term_set
+        |> Enum.map(&expr_to_term(&1, sources, query))
+        |> Enum.intersperse(", "),
+        "])"
+      ]
+    end
+
+    defp search_expr_opts([], _, _), do: ""
+
+    defp search_expr_opts(opts, sources, query) do
+      [
+        ", ",
+        opts
+        |> Enum.map(fn {opt, value} ->
+          [Atom.to_string(opt), " => ", expr(value, sources, query)]
+        end)
+        |> Enum.intersperse(", ")
+      ]
+    end
+
+    defp expr_to_term({field, term}, sources, query) when is_atom(field) do
+      [
+        "paradedb.term(field => ",
+        atom_to_string(field),
+        ", value => ",
+        expr(term, sources, query),
+        ")"
+      ]
+    end
+
+    defp atom_to_string(atom) when is_atom(atom) do
+      [?', Atom.to_string(atom), ?']
     end
 
     defp json_extract_path(expr, [], sources, query) do
