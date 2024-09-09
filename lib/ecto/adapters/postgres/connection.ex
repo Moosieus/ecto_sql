@@ -1400,7 +1400,7 @@ if Code.ensure_loaded?(Postgrex) do
       [
         "paradedb.term_set(terms => ARRAY[",
         term_set
-        |> Enum.map(&expr_to_term(&1, sources, query))
+        |> Enum.map(&search_expr(&1, sources, query))
         |> Enum.intersperse(", "),
         "])"
       ]
@@ -1416,16 +1416,6 @@ if Code.ensure_loaded?(Postgrex) do
           [Atom.to_string(opt), " => ", expr(value, sources, query)]
         end)
         |> Enum.intersperse(", ")
-      ]
-    end
-
-    defp expr_to_term({field, term}, sources, query) when is_atom(field) do
-      [
-        "paradedb.term(field => ",
-        atom_to_string(field),
-        ", value => ",
-        expr(term, sources, query),
-        ")"
       ]
     end
 
