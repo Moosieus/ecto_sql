@@ -1232,6 +1232,16 @@ if Code.ensure_loaded?(Postgrex) do
       ]
     end
 
+    defp search_expr({:disjunction_max, _, [_, disjuncts]}, sources, query) do
+      [
+        "paradedb.disjunction_max(disjuncts => ARRAY[",
+        disjuncts
+        |> Enum.map(&search_expr(&1, sources, query))
+        |> Enum.intersperse(", "),
+        "])"
+      ]
+    end
+
     defp search_expr({:empty, _, [_]}, _, _) do
       "paradedb.empty()"
     end
