@@ -585,7 +585,8 @@ if Code.ensure_loaded?(Postgrex) do
 
       [
         " FROM ",
-        from, "_search_idx.search(query => ",
+        from,
+        "_search_idx.search(query => ",
         search(searches, sources, query),
         search_opts(query, sources),
         ?),
@@ -616,7 +617,8 @@ if Code.ensure_loaded?(Postgrex) do
       end
     end
 
-    defp search([], _sources, _query), do: raise("Unreachable! (write a better error message here)")
+    defp search([], _sources, _query),
+      do: raise("Unreachable! (todo: write a better error message here)")
 
     defp search([%{expr: expr, op: _}], sources, query) do
       search_expr(expr, sources, query)
@@ -1341,6 +1343,30 @@ if Code.ensure_loaded?(Postgrex) do
         expr(phrases, sources, query),
         ", slop => ",
         expr(slop, sources, query),
+        ")"
+      ]
+    end
+
+    defp search_expr(
+           {range, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}, start, stop, bounds]},
+           sources,
+           query
+         )
+         when range in ~w(int4range int8range daterange tsrange tstzrange)a do
+      IO.inspect(bounds, label: "bounds")
+
+      [
+        "paradedb.range(field => ",
+        atom_to_string(field),
+        ", range => ",
+        Atom.to_string(range),
+        "(",
+        expr(start, sources, query),
+        ",",
+        expr(stop, sources, query),
+        ",",
+        expr(bounds, sources, query),
+        ")",
         ")"
       ]
     end
