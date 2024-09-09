@@ -1199,6 +1199,10 @@ if Code.ensure_loaded?(Postgrex) do
       error!(query, "unsupported expression: #{inspect(expr)}")
     end
 
+    defp search_expr({:is_nil, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}]}, _, _) do
+      ["paradedb.boolean(must_not => paradedb.exists(field => ", atom_to_string(field), "))"]
+    end
+
     defp search_expr({:parse, _, [_, parade_db_query]}, sources, query) do
       ["paradedb.parse(", expr(parade_db_query, sources, query), ")"]
     end
@@ -1234,7 +1238,7 @@ if Code.ensure_loaded?(Postgrex) do
 
     defp search_expr({:exists, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}]}, _, _)
          when is_atom(field) do
-      ["paradedb.exists(field => ", ?', Atom.to_string(field), ?', ")"]
+      ["paradedb.exists(field => ", atom_to_string(field), ")"]
     end
 
     defp search_expr(
