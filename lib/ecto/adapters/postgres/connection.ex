@@ -167,7 +167,7 @@ if Code.ensure_loaded?(Postgrex) do
     end
 
     @parent_as __MODULE__
-    alias Ecto.Query.{BooleanExpr, ByExpr, JoinExpr, QueryExpr, WithExpr}
+    alias Ecto.Query.{BooleanExpr, SearchExpr, ByExpr, JoinExpr, QueryExpr, WithExpr}
 
     @impl true
     def all(query, as_prefix \\ []) do
@@ -576,12 +576,17 @@ if Code.ensure_loaded?(Postgrex) do
     end
 
     defp from(%{from: %{source: source, hints: hints}, searches: []} = query, sources) do
+
+      IO.inspect(source, label: "source")
+
       {from, name} = get_source(query, sources, 0, source)
       [" FROM ", from, " AS ", name | Enum.map(hints, &[?\s | &1])]
     end
 
     defp from(%{from: %{source: source, hints: _}, searches: searches} = query, sources) do
       {[34, from, 34], name} = get_source(query, sources, 0, source)
+
+      IO.inspect(source, label: "source")
 
       [
         " FROM ",
@@ -625,15 +630,17 @@ if Code.ensure_loaded?(Postgrex) do
     end
 
     defp search([%{expr: expr, op: op} | query_exprs], sources, query) do
+      IO.inspect(expr, label: "search expr")
+
       [
         Enum.reduce(
           query_exprs,
           {op, [operator_to_pdb_boolean(op), search_expr(expr, sources, query)]},
           fn
-            %BooleanExpr{expr: expr, op: op}, {op, acc} ->
+            %SearchExpr{expr: expr, op: op}, {op, acc} ->
               {op, [acc, ", ", search_expr(expr, sources, query)]}
 
-            %BooleanExpr{expr: expr, op: op}, {_, acc} ->
+            %SearchExpr{expr: expr, op: op}, {_, acc} ->
               {op,
                [operator_to_pdb_boolean(op), acc, ?], ?), ", ", search_expr(expr, sources, query)]}
           end
@@ -812,6 +819,8 @@ if Code.ensure_loaded?(Postgrex) do
               source: source,
               hints: hints
             } ->
+              IO.inspect(source, label: "source")
+
               if hints != [] do
                 error!(query, "table hints are not supported by PostgreSQL")
               end
@@ -1232,7 +1241,7 @@ if Code.ensure_loaded?(Postgrex) do
       ]
     end
 
-    defp search_expr({:disjunction_max, _, [_, disjuncts]}, sources, query) do
+    defp search_expr({:disjunction_max, _, [disjuncts]}, sources, query) do
       [
         "paradedb.disjunction_max(disjuncts => ARRAY[",
         disjuncts
@@ -2190,6 +2199,8 @@ if Code.ensure_loaded?(Postgrex) do
     ## Helpers
 
     defp get_source(query, sources, ix, source) do
+      IO.inspect(ix, label: "ix")
+
       {expr, name, _schema} = elem(sources, ix)
       name = maybe_add_column_names(source, name)
       {expr || expr(source, sources, query), name}
