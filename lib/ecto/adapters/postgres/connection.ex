@@ -1397,7 +1397,7 @@ if Code.ensure_loaded?(Postgrex) do
       ]
     end
 
-    defp search_expr({:term_set, _, [_, term_set]}, sources, query) when is_list(term_set) do
+    defp search_expr({:term_set, _, [term_set]}, sources, query) when is_list(term_set) do
       [
         "paradedb.term_set(terms => ARRAY[",
         term_set
