@@ -575,29 +575,9 @@ if Code.ensure_loaded?(Postgrex) do
        ], exprs}
     end
 
-    defp from(%{from: %{source: source, hints: hints}, searches: []} = query, sources) do
-
-      IO.inspect(source, label: "source")
-
+    defp from(%{from: %{source: source, hints: hints}} = query, sources) do
       {from, name} = get_source(query, sources, 0, source)
       [" FROM ", from, " AS ", name | Enum.map(hints, &[?\s | &1])]
-    end
-
-    defp from(%{from: %{source: source, hints: _}, searches: searches} = query, sources) do
-      {[34, from, 34], name} = get_source(query, sources, 0, source)
-
-      IO.inspect(source, label: "source")
-
-      [
-        " FROM ",
-        from,
-        "_search_idx.search(query => ",
-        search(searches, sources, query),
-        search_opts(query, sources),
-        ?),
-        " AS ",
-        name
-      ]
     end
 
     defp search_opts(query, sources) do
@@ -630,8 +610,6 @@ if Code.ensure_loaded?(Postgrex) do
     end
 
     defp search([%{expr: expr, op: op} | query_exprs], sources, query) do
-      IO.inspect(expr, label: "search expr")
-
       [
         Enum.reduce(
           query_exprs,
@@ -819,8 +797,6 @@ if Code.ensure_loaded?(Postgrex) do
               source: source,
               hints: hints
             } ->
-              IO.inspect(source, label: "source")
-
               if hints != [] do
                 error!(query, "table hints are not supported by PostgreSQL")
               end
@@ -1135,6 +1111,10 @@ if Code.ensure_loaded?(Postgrex) do
       end
     end
 
+    defp expr({%Ecto.SearchQuery{queries: queries, index: index}, _schema}, sources, query) do
+      [index, ".search(query => ", search(queries, sources, query), ")"]
+    end
+
     defp expr({fun, _, args}, sources, query) when is_atom(fun) and is_list(args) do
       {modifier, args} =
         case args do
@@ -1376,8 +1356,6 @@ if Code.ensure_loaded?(Postgrex) do
            query
          )
          when range in ~w(int4range int8range daterange tsrange tstzrange)a do
-      IO.inspect(bounds, label: "bounds")
-
       [
         "paradedb.range(field => ",
         atom_to_string(field),
@@ -1540,6 +1518,9 @@ if Code.ensure_loaded?(Postgrex) do
 
         {:values, _, _} ->
           {nil, as_prefix ++ [?v | Integer.to_string(pos)], nil}
+
+        {%Ecto.SearchQuery{}, schema, _} ->
+          {nil, as_prefix ++ [?s | Integer.to_string(pos)], schema}
 
         {table, schema, prefix} ->
           name = as_prefix ++ [create_alias(table) | Integer.to_string(pos)]
@@ -2199,8 +2180,6 @@ if Code.ensure_loaded?(Postgrex) do
     ## Helpers
 
     defp get_source(query, sources, ix, source) do
-      IO.inspect(ix, label: "ix")
-
       {expr, name, _schema} = elem(sources, ix)
       name = maybe_add_column_names(source, name)
       {expr || expr(source, sources, query), name}
