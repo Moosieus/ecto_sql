@@ -1206,6 +1206,16 @@ if Code.ensure_loaded?(Postgrex) do
       "paradedb.all()"
     end
 
+    defp search_expr({:boolean, _, [condition, queries]}, sources, query) do
+      [
+        "paradedb.boolean(#{Atom.to_string(condition)} => ARRAY[",
+        queries
+        |> Enum.map(&search_expr(&1, sources, query))
+        |> Enum.intersperse(", "),
+        "])"
+      ]
+    end
+
     defp search_expr({:boost, _, [subquery, boost]}, sources, query) do
       # the cast to ::real here is ugly, but it works.
       [
