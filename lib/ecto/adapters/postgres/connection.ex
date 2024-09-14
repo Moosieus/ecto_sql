@@ -1192,11 +1192,11 @@ if Code.ensure_loaded?(Postgrex) do
       ["paradedb.boolean(must_not => paradedb.exists(field => ", atom_to_string(field), "))"]
     end
 
-    defp search_expr({:parse, _, [_, parade_db_query]}, sources, query) do
+    defp search_expr({:parse, _, [parade_db_query]}, sources, query) do
       ["paradedb.parse(", expr(parade_db_query, sources, query), ")"]
     end
 
-    defp search_expr({:all, _, [_]}, _, _) do
+    defp search_expr({:all, _, []}, _, _) do
       "paradedb.all()"
     end
 
@@ -1231,7 +1231,7 @@ if Code.ensure_loaded?(Postgrex) do
       ]
     end
 
-    defp search_expr({:empty, _, [_]}, _, _) do
+    defp search_expr({:empty, _, []}, _, _) do
       "paradedb.empty()"
     end
 
