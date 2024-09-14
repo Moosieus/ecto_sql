@@ -167,7 +167,7 @@ if Code.ensure_loaded?(Postgrex) do
     end
 
     @parent_as __MODULE__
-    alias Ecto.Query.{BooleanExpr, SearchExpr, ByExpr, JoinExpr, QueryExpr, WithExpr}
+    alias Ecto.Query.{BooleanExpr, SearchExpr, SearchOpt, ByExpr, JoinExpr, QueryExpr, WithExpr}
 
     @impl true
     def all(query, as_prefix \\ []) do
@@ -578,28 +578,6 @@ if Code.ensure_loaded?(Postgrex) do
     defp from(%{from: %{source: source, hints: hints}} = query, sources) do
       {from, name} = get_source(query, sources, 0, source)
       [" FROM ", from, " AS ", name | Enum.map(hints, &[?\s | &1])]
-    end
-
-    defp search_opts(query, sources) do
-      [
-        case query.search_limit do
-          %QueryExpr{expr: expr} -> ["limit_rows => ", expr(expr, sources, query)]
-          nil -> nil
-        end,
-        case query.search_offset do
-          %QueryExpr{expr: expr} -> ["offset_rows => ", expr(expr, sources, query)]
-          nil -> nil
-        end,
-        case query.search_stable_sort do
-          %QueryExpr{expr: expr} -> ["stable_sort => ", expr(expr, sources, query)]
-          nil -> nil
-        end
-      ]
-      |> Enum.reject(&is_nil(&1))
-      |> case do
-        [] -> []
-        opts -> [", ", Enum.intersperse(opts, ", ")]
-      end
     end
 
     defp search([], _sources, _query),
@@ -1111,8 +1089,17 @@ if Code.ensure_loaded?(Postgrex) do
       end
     end
 
-    defp expr({%Ecto.SearchQuery{queries: queries, index: index}, _schema}, sources, query) do
-      [index, ".search(query => ", search(queries, sources, query), ")"]
+    defp expr(
+           {%Ecto.SearchQuery{index: index, queries: queries, options: options}, _schema},
+           sources,
+           query
+         ) do
+      [
+        "#{index}.search(query => ",
+        search(queries, sources, query),
+        search_opts(options, sources, query),
+        ")"
+      ]
     end
 
     defp expr({fun, _, args}, sources, query) when is_atom(fun) and is_list(args) do
@@ -1186,6 +1173,25 @@ if Code.ensure_loaded?(Postgrex) do
 
     defp expr(expr, _sources, query) do
       error!(query, "unsupported expression: #{inspect(expr)}")
+    end
+
+    defp search_opts(options, sources, query) do
+      Enum.map(options, fn
+        {:order_by, %SearchOpt{expr: {{{:., _, [{:&, _, [_]}, field]}, _, _}, direction}}} ->
+          [
+            "order_by_field => ",
+            atom_to_string(field),
+            ", order_by_direction => ",
+            atom_to_string(direction)
+          ]
+
+        {name, %SearchOpt{expr: expr}} ->
+          ["#{Atom.to_string(name)} => ", expr(expr, sources, query)]
+      end)
+      |> case do
+        [] -> []
+        opts -> [", ", Enum.intersperse(opts, ", ")]
+      end
     end
 
     defp search_expr({:is_nil, _, [{{:., _, [{:&, _, [_]}, field]}, _, _}]}, _, _) do
