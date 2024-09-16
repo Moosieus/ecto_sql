@@ -1206,13 +1206,30 @@ if Code.ensure_loaded?(Postgrex) do
       "paradedb.all()"
     end
 
-    defp search_expr({:boolean, _, [condition, queries]}, sources, query) do
+    defp search_expr({:boolean, _, [conditions]}, sources, query) do
       [
-        "paradedb.boolean(#{Atom.to_string(condition)} => ARRAY[",
-        queries
-        |> Enum.map(&search_expr(&1, sources, query))
+        "paradedb.boolean(",
+        conditions
+        |> Enum.map(fn
+          {condition, exprs} when is_list(exprs) ->
+            [
+              Atom.to_string(condition),
+              " => ARRAY[",
+              exprs
+              |> Enum.map(&search_expr(&1, sources, query))
+              |> Enum.intersperse(", "),
+              "]"
+            ]
+
+          {condition, expr} ->
+            [
+              Atom.to_string(condition),
+              " => ",
+              search_expr(expr, sources, query)
+            ]
+        end)
         |> Enum.intersperse(", "),
-        "])"
+        ")"
       ]
     end
 
