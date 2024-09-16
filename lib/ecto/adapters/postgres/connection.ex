@@ -1248,7 +1248,7 @@ if Code.ensure_loaded?(Postgrex) do
       [
         "paradedb.const_score(query => ",
         search_expr(subquery, sources, query),
-        ", const_score => ",
+        ", score => ",
         expr(score, sources, query),
         "::real)"
       ]
